@@ -418,62 +418,51 @@ fn video_worker(rx: Receiver<AppCommand>, tx: Sender<AppEvent>) {
     worker.run();
 }
 
-fn find_position(data: &[u8], width: usize, _height: usize) -> Option<[f32; 2]> {
-    let px_for_row = width * 4;
-    let px_for_col = 4;
+fn find_position(data: &[u8], width: usize, height: usize) -> Option<[f32; 2]> {
+    let stride = width * 4;
     let lim_max = 210;
     let lim_min = 90;
+    let lim_k_min = 130;
 
-    let limit = data.len().saturating_sub(20 * px_for_row);
+    let scan_limit_y = height.saturating_sub(20);
+    let scan_limit_x = width.saturating_sub(1);
 
-    for i in (0..limit).step_by(4) {
-        if i + 2 >= data.len() { continue; }
-
-        if data[i] >= lim_max && data[i+1] >= lim_max && data[i+2] >= lim_max {
-
-            if i + px_for_col + 2 >= data.len() { continue; }
-
-            if data[i + px_for_col] >= lim_min
-               || data[i + px_for_col + 1] >= lim_min
-               || data[i + px_for_col + 2] >= lim_min {
+    for y in 0..scan_limit_y {
+        for x in 1..scan_limit_x {
+            let i = (y * width + x) * 4;
+            if data[i] < lim_max || data[i+1] < lim_max || data[i+2] < lim_max {
                 continue;
             }
-
-            let mut valid_vertical = true;
-            for j in 1..14 {
-                 let idx = i + j * px_for_row;
-                 if idx + 2 >= data.len() { valid_vertical = false; break; }
-
-                 if data[idx] <= lim_max
-                    || data[idx+1] <= lim_max
-                    || data[idx+2] <= lim_max {
-                     valid_vertical = false;
-                     break;
-                 }
+            if data[i+4] >= lim_k_min || data[i+5] >= lim_k_min || data[i+6] >= lim_k_min {
+                continue;
             }
-            if !valid_vertical { continue; }
-
-            let mut valid_left = true;
-            for j in 0..14 {
-                let base = i + j * px_for_row;
-                if base < px_for_col { valid_left = false; break; }
-                let idx = base - px_for_col;
-
-                if idx + 2 >= data.len() { valid_left = false; break; }
-
-                if data[idx] >= lim_min
-                   || data[idx+1] >= lim_min
-                   || data[idx+2] >= lim_min {
-                    valid_left = false;
+            let mut spine_ok = true;
+            for j in 1..13 {
+                let idx = i + j * stride;
+                if data[idx] <= lim_max || data[idx+1] <= lim_max || data[idx+2] <= lim_max {
+                    spine_ok = false;
                     break;
                 }
             }
-            if !valid_left { continue; }
-
-            let x = i % px_for_row;
-            let y = (i - x) / px_for_row;
-
-            return Some([(x / 4) as f32, y as f32]);
+            if !spine_ok { continue; }
+            let mut left_ok = true;
+            for j in 0..13 {
+                let idx = i + j * stride - 4;
+                if data[idx] >= lim_min || data[idx+1] >= lim_min || data[idx+2] >= lim_min {
+                    left_ok = false;
+                    break;
+                }
+            }
+            if !left_ok { continue; }
+            let mut diag_score = 0;
+            for d in 1..8 {
+                let d_idx = i + d * stride + d * 4;
+                if data[d_idx] > 160 || data[d_idx+1] > 160 || data[d_idx+2] > 160 {
+                    diag_score += 1;
+                }
+            }
+            if diag_score < 4 { continue; }
+            return Some([x as f32, y as f32]);
         }
     }
     None
